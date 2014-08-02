@@ -6,7 +6,7 @@ export View
 
 # Tasks:
 #    creating a View from an AbstractArray---done
-#    creating a View from a View (should "pop" the old view and create a more compact one)
+#    creating a View from a View---done
 #    scalar-indexing a View{T,N} using N indexes---done
 #    scalar-indexing a View{T,N} with < N indexes aka linear indexing (ugh)---done
 #    utility functions like length, size---done
@@ -42,6 +42,7 @@ similar(V::View, T, dim::Dims) = similar(V.parent, T, dims)
 
 # Constructor
 stagedfunction View(A::AbstractArray, I::RangeIndex...)
+    length(I) == ndims(A) || error("Number of indexes $(length(I)) does not match $A")
     N = 0
     sizeexprs = Any[]
     for k = 1:length(I)
@@ -56,6 +57,41 @@ stagedfunction View(A::AbstractArray, I::RangeIndex...)
     :(ArrayViewsAPL.View{$T,$N,$A,$I}(A, I, $dims))
 end
 
+# Constructing from another View
+# This "pops" the old View and creates a more compact one
+stagedfunction View(V::View, I::RangeIndex...)
+    T, NV, PV, IV = V.parameters
+    length(I) == ndims(V) || error("Number of indexes $(length(I)) does not match $V")
+    N = 0
+    sizeexprs = Any[]
+    indexexprs = Any[]
+    Itypeexprs = Any[]
+    k = 0
+    for j = 1:length(IV)
+        if IV[j] <: Real
+            push!(indexexprs, :(V.indexes[$j]))
+            push!(Itypeexprs, IV[j])
+        else
+            k += 1
+            i = I[k]
+            if !(i <: Real)
+                N += 1
+                push!(sizeexprs, :(length(I[$k])))
+            end
+            push!(indexexprs, :(V.indexes[$j][I[$k]]))
+            push!(Itypeexprs, :($(rangetype(IV[j], I[k]))))
+        end
+    end
+    Inew = :(tuple($(indexexprs...)))
+    dims = :(tuple($(sizeexprs...)))
+    Itypes = :(tuple($(Itypeexprs...)))
+    :(ArrayViewsAPL.View{$T,$N,$PV,$Itypes}(V.parent, $Inew, $dims))
+end
+function rangetype(T1, T2)
+    rt = Base.return_types(getindex, (T1, T2))
+    length(rt) == 1 || error("Can't infer return type")
+    rt[1]
+end
 
 # Scalar indexing
 stagedfunction getindex(V::View, i1::Real)
