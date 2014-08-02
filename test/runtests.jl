@@ -27,3 +27,6 @@ C = View(B, 2, 1:2)
 @test ndims(C) == 1
 @test C[1] == B[2,1]
 @test C[2] == B[2,2]
+
+@test C[1,1] == B[2,1]
+@test_throws BoundsError C[1,2]

@@ -206,11 +206,9 @@ function index_generate(V, Vsym, Isyms)
         exhead = Expr(:block, linblock...)
         pop!(Isyms)
         append!(Isyms, indexes)
-    elseif length(Isyms) != N
-        error("Wrong number of indexes supplied")
     end
     NP = length(I)
-    indexexprs = Array(Expr, NP)
+    indexexprs = Array(Any, NP)
     j = 1
     for i = 1:NP
         if I[i] <: Real
@@ -219,6 +217,10 @@ function index_generate(V, Vsym, Isyms)
             indexexprs[i] = :($Vsym.indexes[$i][$(Isyms[j])])  # TODO: make Range bounds-checking respect @inbounds
             j += 1
         end
+    end
+    # Append any extra indexes. Must be trailing 1s or it will cause a BoundsError.
+    for k = N+1:length(Isyms)
+        push!(indexexprs, :($(Isyms[k])))
     end
     exhead, :($Vsym.parent[$(indexexprs...)])
 end
