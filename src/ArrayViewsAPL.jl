@@ -94,40 +94,28 @@ function rangetype(T1, T2)
 end
 
 # Scalar indexing
-stagedfunction getindex(V::View, i1::Real)
-    exhead, ex = index_generate(V, :V, [:i1])
-    quote
-        $exhead
-        $ex
-    end
-end
-stagedfunction getindex(V::View, i1::Real, i2::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2])
-    quote
-        $exhead
-        $ex
-    end
-end
-stagedfunction getindex(V::View, i1::Real, i2::Real, i3::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2, :i3])
-    quote
-        $exhead
-        $ex
-    end
-end
-stagedfunction getindex(V::View, i1::Real, i2::Real, i3::Real, i4::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2, :i3, :i4])
-    quote
-        $exhead
-        $ex
-    end
-end
-stagedfunction getindex(V::View, I::Real...)
-    Isyms = [:(I[$d]) for d = 1:length(I)]
-    exhead, ex = index_generate(V, :V, Isyms)
-    quote
-        $exhead
-        $ex
+# Low dimensions: avoid splatting
+vars = Expr[]
+typedvars = Expr[]
+for i = 1:4
+    sym = symbol(string("i",i))
+    push!(vars, Expr(:quote, sym))
+    push!(typedvars, :($sym::Real))
+    @eval begin
+        stagedfunction getindex(V::View, $(typedvars...))
+            exhead, ex = index_generate(V, :V, [$(vars...)])
+            quote
+                $exhead
+                $ex
+            end
+        end
+        stagedfunction setindex!(V::View, v, $(typedvars...))
+            exhead, ex = index_generate(V, :V, [$(vars...)])
+            quote
+                $exhead
+                $ex = v
+            end
+        end
     end
 end
 # V[] notation (extracts the first element)
@@ -139,33 +127,13 @@ stagedfunction getindex(V::View)
         $ex
     end
 end
-
-stagedfunction setindex!(V::View, v, i1::Real)
-    exhead, ex = index_generate(V, :V, [:i1])
+# Splatting variants
+stagedfunction getindex(V::View, I::Real...)
+    Isyms = [:(I[$d]) for d = 1:length(I)]
+    exhead, ex = index_generate(V, :V, Isyms)
     quote
         $exhead
-        $ex = v
-    end
-end
-stagedfunction setindex!(V::View, v, i1::Real, i2::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2])
-    quote
-        $exhead
-        $ex = v
-    end
-end
-stagedfunction setindex!(V::View, v, i1::Real, i2::Real, i3::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2, :i3])
-    quote
-        $exhead
-        $ex = v
-    end
-end
-stagedfunction setindex!(V::View, v, i1::Real, i2::Real, i3::Real, i4::Real)
-    exhead, ex = index_generate(V, :V, [:i1, :i2, :i3, :i4])
-    quote
-        $exhead
-        $ex = v
+        $ex
     end
 end
 stagedfunction setindex!(V::View, v, I::Real...)
