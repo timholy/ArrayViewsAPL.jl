@@ -39,5 +39,5 @@ To test it, you must be on the [`teh/staged`](https://github.com/timholy/julia/t
 which descends from the `kf/staged` branch with one additional fix and then rebased to a recent master.
 
 Currently two types of view-creation are supported: `subview` and `sliceview`.
-`subview` duplicated Julia's current indexing rules (including dropping trailing dimensions of size 1), and `sliceview` is aimed at full APL support (currently it behaves analogously to Julia's `slice`).
+`subview` duplicates Julia's current indexing rules (including dropping trailing dimensions of size 1), and `sliceview` is aimed at full APL support (currently it behaves analogously to Julia's `slice`).
 See also https://github.com/JuliaLang/julia/issues/5949.
