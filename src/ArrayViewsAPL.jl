@@ -2,7 +2,12 @@ module ArrayViewsAPL
 
 import Base: copy, eltype, getindex, length, ndims, setindex!, similar, size
 
-export View
+export
+    # types
+    View,
+    # functions
+    sliceview,
+    subview
 
 # Tasks:
 #    creating a View from an AbstractArray---done
@@ -24,7 +29,10 @@ export View
 #                    and teach codegen to look for such expressions, skipping them if inside @inbounds.
 #                    See https://github.com/JuliaLang/julia/pull/3796#issuecomment-21433164)
 
-immutable View{T,N,P<:AbstractArray,I<:(RangeIndex...)} <: AbstractArray{T,N} # <: ArrayView{T,N,0}
+typealias RealRangeIndex Union(Real, Range{Int})
+
+# Since there are no multidimensional range objects, we only permit 1d indexes
+immutable View{T,N,P<:AbstractArray,I<:(RealRangeIndex...)} <: AbstractArray{T,N}
     parent::P
     indexes::I
     dims::NTuple{N,Int}
@@ -40,8 +48,9 @@ size(V::View, d::Integer) = d <= ndims(V) ? (@inbounds ret = V.dims[d]; ret) : 1
 length(V::View) = prod(V.dims)
 similar(V::View, T, dim::Dims) = similar(V.parent, T, dims)
 
-# Constructor
-stagedfunction View(A::AbstractArray, I::RangeIndex...)
+## View creation
+# APL-style.
+stagedfunction sliceview(A::AbstractArray, I::RealRangeIndex...)
     length(I) == ndims(A) || error("Number of indexes $(length(I)) does not match $A")
     N = 0
     sizeexprs = Any[]
@@ -57,9 +66,30 @@ stagedfunction View(A::AbstractArray, I::RangeIndex...)
     :(ArrayViewsAPL.View{$T,$N,$A,$I}(A, I, $dims))
 end
 
+# Conventional style (drop trailing singleton dimensions, keep any other singletons)
+stagedfunction subview(A::AbstractArray, I::RealRangeIndex...)
+    length(I) == ndims(A) || error("Number of indexes $(length(I)) does not match $A")
+    N = 0
+    sizeexprs = Any[]
+    klast = length(I)
+    while klast > 1 && I[klast] <: Real
+        klast -= 1
+    end
+    for k = 1:length(I)
+        i = I[k]
+        if k <= klast
+            N += 1
+            push!(sizeexprs, :(length(I[$k])))
+        end
+    end
+    dims = :(tuple($(sizeexprs...)))
+    T = eltype(A)
+    :(ArrayViewsAPL.View{$T,$N,$A,$I}(A, I, $dims))
+end
+
 # Constructing from another View
 # This "pops" the old View and creates a more compact one
-stagedfunction View(V::View, I::RangeIndex...)
+stagedfunction sliceview(V::View, I::RealRangeIndex...)
     T, NV, PV, IV = V.parameters
     length(I) == ndims(V) || error("Number of indexes $(length(I)) does not match $V")
     N = 0
@@ -75,6 +105,38 @@ stagedfunction View(V::View, I::RangeIndex...)
             k += 1
             i = I[k]
             if !(i <: Real)
+                N += 1
+                push!(sizeexprs, :(length(I[$k])))
+            end
+            push!(indexexprs, :(V.indexes[$j][I[$k]]))
+            push!(Itypeexprs, :($(rangetype(IV[j], I[k]))))
+        end
+    end
+    Inew = :(tuple($(indexexprs...)))
+    dims = :(tuple($(sizeexprs...)))
+    Itypes = :(tuple($(Itypeexprs...)))
+    :(ArrayViewsAPL.View{$T,$N,$PV,$Itypes}(V.parent, $Inew, $dims))
+end
+stagedfunction subview(V::View, I::RealRangeIndex...)
+    T, NV, PV, IV = V.parameters
+    length(I) == ndims(V) || error("Number of indexes $(length(I)) does not match $V")
+    klast = length(I)
+    while klast > 1 && I[klast] <: Real
+        klast -= 1
+    end
+    N = 0
+    sizeexprs = Any[]
+    indexexprs = Any[]
+    Itypeexprs = Any[]
+    k = 0
+    for j = 1:length(IV)
+        if IV[j] <: Real
+            push!(indexexprs, :(V.indexes[$j]))
+            push!(Itypeexprs, IV[j])
+        else
+            k += 1
+            i = I[k]
+            if k <= klast
                 N += 1
                 push!(sizeexprs, :(length(I[$k])))
             end
@@ -192,6 +254,8 @@ function index_generate(V, Vsym, Isyms)
     end
     exhead, :($Vsym.parent[$(indexexprs...)])
 end
+
+## Implementations of getindex for AbstractArrays and Views
 
 # More utility functions
 stagedfunction copy(V::View)
