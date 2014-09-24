@@ -51,8 +51,8 @@ similar(V::View, T, dim::Dims) = similar(V.parent, T, dims)
 
 ## View creation
 # APL-style.
-stagedfunction sliceview(A::AbstractArray, I::RealRangeIndex...)
-    length(I) == ndims(A) || error("Number of indexes $(length(I)) does not match $A")
+stagedfunction sliceview(A::AbstractArray, I::ViewIndex...)
+    length(I) == ndims(A) || error("$(length(I)) indexes does not match $A")
     N = 0
     sizeexprs = Any[]
     for k = 1:length(I)
@@ -68,88 +68,99 @@ stagedfunction sliceview(A::AbstractArray, I::RealRangeIndex...)
 end
 
 # Conventional style (drop trailing singleton dimensions, keep any other singletons)
-stagedfunction subview(A::AbstractArray, I::RealRangeIndex...)
-    length(I) == ndims(A) || error("Number of indexes $(length(I)) does not match $A")
-    N = 0
+stagedfunction subview(A::AbstractArray, I::ViewIndex...)
+    length(I) == ndims(A) || error("$(length(I)) indexes does not match $A")
     sizeexprs = Any[]
-    klast = length(I)
-    while klast > 1 && I[klast] <: Real
-        klast -= 1
+    Itypes = Any[]
+    Iexprs = Any[]
+    N = length(I)
+    while N > 0 && I[N] <: Real
+        N -= 1
     end
     for k = 1:length(I)
-        i = I[k]
-        if k <= klast
-            N += 1
+        if k <= N
             push!(sizeexprs, :(length(I[$k])))
+        end
+        if k <= N && I[k] <: Real
+            push!(Itypes, UnitRange{Int})
+            push!(Iexprs, :(int(I[$k]):int(I[$k])))
+        else
+            push!(Itypes, I[k])
+            push!(Iexprs, :(I[$k]))
         end
     end
     dims = :(tuple($(sizeexprs...)))
+    Iext = :(tuple($(Iexprs...)))
     T = eltype(A)
-    :(ArrayViewsAPL.View{$T,$N,$A,$I}(A, I, $dims))
+    It = tuple(Itypes...)
+    :(ArrayViewsAPL.View{$T,$N,$A,$It}(A, $Iext, $dims))
 end
 
 # Constructing from another View
 # This "pops" the old View and creates a more compact one
-stagedfunction sliceview(V::View, I::RealRangeIndex...)
+stagedfunction sliceview(V::View, I::ViewIndex...)
     T, NV, PV, IV = V.parameters
-    length(I) == ndims(V) || error("Number of indexes $(length(I)) does not match $V")
+    length(I) == NV || error("$(length(I)) indexes does not match $V")
     N = 0
     sizeexprs = Any[]
     indexexprs = Any[]
-    Itypeexprs = Any[]
+    Itypes = Any[]
     k = 0
     for j = 1:length(IV)
         if IV[j] <: Real
             push!(indexexprs, :(V.indexes[$j]))
-            push!(Itypeexprs, IV[j])
+            push!(Itypes, IV[j])
         else
             k += 1
-            i = I[k]
-            if !(i <: Real)
+            if !(I[k] <: Real)
                 N += 1
                 push!(sizeexprs, :(length(I[$k])))
             end
             push!(indexexprs, :(V.indexes[$j][I[$k]]))
-            push!(Itypeexprs, :($(rangetype(IV[j], I[k]))))
+            push!(Itypes, rangetype(IV[j], I[k]))
         end
     end
     Inew = :(tuple($(indexexprs...)))
     dims = :(tuple($(sizeexprs...)))
-    Itypes = :(tuple($(Itypeexprs...)))
-    :(ArrayViewsAPL.View{$T,$N,$PV,$Itypes}(V.parent, $Inew, $dims))
+    It = tuple(Itypes...)
+    :(ArrayViewsAPL.View{$T,$N,$PV,$It}(V.parent, $Inew, $dims))
 end
-stagedfunction subview(V::View, I::RealRangeIndex...)
+
+stagedfunction subview(V::View, I::ViewIndex...)
     T, NV, PV, IV = V.parameters
-    length(I) == ndims(V) || error("Number of indexes $(length(I)) does not match $V")
-    klast = length(I)
-    while klast > 1 && I[klast] <: Real
-        klast -= 1
+    length(I) == NV || error("$(length(I)) indexes does not match $V")
+    N = length(I)
+    while N > 0 && I[N] <: Real
+        N -= 1
     end
-    N = 0
     sizeexprs = Any[]
     indexexprs = Any[]
-    Itypeexprs = Any[]
+    Itypes = Any[]
     k = 0
     for j = 1:length(IV)
         if IV[j] <: Real
             push!(indexexprs, :(V.indexes[$j]))
-            push!(Itypeexprs, IV[j])
+            push!(Itypes, IV[j])
         else
             k += 1
-            i = I[k]
-            if k <= klast
-                N += 1
+            if k <= N
                 push!(sizeexprs, :(length(I[$k])))
             end
-            push!(indexexprs, :(V.indexes[$j][I[$k]]))
-            push!(Itypeexprs, :($(rangetype(IV[j], I[k]))))
+            if k <= N && I[k] <: Real
+                push!(indexexprs, :(V.indexes[$j][int(I[$k]):int(I[$k])]))
+                push!(Itypes, rangetype(IV[j], UnitRange{Int}))
+            else
+                push!(indexexprs, :(V.indexes[$j][I[$k]]))
+                push!(Itypes, rangetype(IV[j], I[k]))
+            end
         end
     end
     Inew = :(tuple($(indexexprs...)))
     dims = :(tuple($(sizeexprs...)))
-    Itypes = :(tuple($(Itypeexprs...)))
-    :(ArrayViewsAPL.View{$T,$N,$PV,$Itypes}(V.parent, $Inew, $dims))
+    It = tuple(Itypes...)
+    :(ArrayViewsAPL.View{$T,$N,$PV,$It}(V.parent, $Inew, $dims))
 end
+
 function rangetype(T1, T2)
     rt = Base.return_types(getindex, (T1, T2))
     length(rt) == 1 || error("Can't infer return type")
