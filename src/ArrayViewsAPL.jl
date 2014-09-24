@@ -29,10 +29,11 @@ export
 #                    and teach codegen to look for such expressions, skipping them if inside @inbounds.
 #                    See https://github.com/JuliaLang/julia/pull/3796#issuecomment-21433164)
 
-typealias RealRangeIndex Union(Real, Range{Int})
+typealias ViewIndex Union(Int, UnitRange{Int}, StepRange{Int,Int}, Vector{Int})
+typealias NonSliceIndex Union(UnitRange{Int}, StepRange{Int,Int}, Vector{Int})
 
 # Since there are no multidimensional range objects, we only permit 1d indexes
-immutable View{T,N,P<:AbstractArray,I<:(RealRangeIndex...)} <: AbstractArray{T,N}
+immutable View{T,N,P<:AbstractArray,I<:(ViewIndex...)} <: AbstractArray{T,N}
     parent::P
     indexes::I
     dims::NTuple{N,Int}
