@@ -207,12 +207,14 @@ stagedfunction setindex!(V::View, v, I::Real...)
     end
 end
 
-function index_generate(V, Vsym, Isyms)
-    T, N, P, I = V.parameters
+function index_generate(Nd, Itypes, Vsym, Isyms)
+    if isempty(Isyms)
+        Isyms = Any[1]  # this handles the syntax getindex(V)
+    end
     exhead = :nothing
-    if length(Isyms) < N
+    if length(Isyms) < Nd
         # Linear indexing in the last index
-        n = N - length(Isyms)
+        n = Nd - length(Isyms)
         m = length(Isyms)
         strides = [gensym() for i = 1:n]
         indexes = [gensym() for i = 1:n+1]
@@ -237,19 +239,19 @@ function index_generate(V, Vsym, Isyms)
         pop!(Isyms)
         append!(Isyms, indexes)
     end
-    NP = length(I)
+    NP = length(Itypes)
     indexexprs = Array(Any, NP)
-    j = 1
+    j = 0
     for i = 1:NP
-        if I[i] <: Real
+        if Itypes[i] <: Real
             indexexprs[i] = :($Vsym.indexes[$i])
         else
-            indexexprs[i] = :($Vsym.indexes[$i][$(Isyms[j])])  # TODO: make Range bounds-checking respect @inbounds
             j += 1
+            indexexprs[i] = :(unsafe_getindex($Vsym.indexes[$i], $(Isyms[j])))  # TODO: make Range bounds-checking respect @inbounds
         end
     end
     # Append any extra indexes. Must be trailing 1s or it will cause a BoundsError.
-    for k = N+1:length(Isyms)
+    for k = j+1:length(Isyms)
         push!(indexexprs, :($(Isyms[k])))
     end
     exhead, :($Vsym.parent[$(indexexprs...)])
