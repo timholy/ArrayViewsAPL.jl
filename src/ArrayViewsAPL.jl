@@ -177,14 +177,15 @@ for i = 1:4
     push!(typedvars, :($sym::Real))
     @eval begin
         stagedfunction getindex(V::View, $(typedvars...))
-            exhead, ex = index_generate(V, :V, [$(vars...)])
+            T, N, P, IV = V.parameters
+            exhead, ex = index_generate(N, IV, :V, [$(vars...)])
             quote
                 $exhead
                 $ex
             end
         end
         stagedfunction setindex!(V::View, v, $(typedvars...))
-            exhead, ex = index_generate(V, :V, [$(vars...)])
+            exhead, ex = index_generate(N, IV, :V, [$(vars...)])
             quote
                 $exhead
                 $ex = v
@@ -194,8 +195,9 @@ for i = 1:4
 end
 # V[] notation (extracts the first element)
 stagedfunction getindex(V::View)
+    T, N, P, IV = V.parameters
     Isyms = ones(Int, ndims(V))
-    exhead, ex = index_generate(V, :V, Isyms)
+    exhead, ex = index_generate(N, IV, :V, Isyms)
     quote
         $exhead
         $ex
@@ -203,16 +205,18 @@ stagedfunction getindex(V::View)
 end
 # Splatting variants
 stagedfunction getindex(V::View, I::Real...)
+    T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
-    exhead, ex = index_generate(V, :V, Isyms)
+    exhead, ex = index_generate(N, IV, :V, Isyms)
     quote
         $exhead
         $ex
     end
 end
 stagedfunction setindex!(V::View, v, I::Real...)
+    T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
-    exhead, ex = index_generate(V, :V, Isyms)
+    exhead, ex = index_generate(N, IV, :V, Isyms)
     quote
         $exhead
         $ex = v
@@ -251,23 +255,30 @@ function index_generate(Nd, Itypes, Vsym, Isyms)
         pop!(Isyms)
         append!(Isyms, indexes)
     end
-    NP = length(Itypes)
-    indexexprs = Array(Any, NP)
+    Nparent = length(Itypes)
+    indexexprs = Array(Any, Nparent)
     j = 0
-    for i = 1:NP
+    for i = 1:Nparent
         if Itypes[i] <: Real
             indexexprs[i] = :($Vsym.indexes[$i])
         else
             j += 1
-            indexexprs[i] = :(unsafe_getindex($Vsym.indexes[$i], $(Isyms[j])))  # TODO: make Range bounds-checking respect @inbounds
+            indexexprs[i] = :(ArrayViewsAPL.unsafe_getindex($Vsym.indexes[$i], $(Isyms[j])))  # TODO: make Range bounds-checking respect @inbounds
         end
     end
     # Append any extra indexes. Must be trailing 1s or it will cause a BoundsError.
     for k = j+1:length(Isyms)
-        push!(indexexprs, :($(Isyms[k])))
+        push!(indexexprs, Isyms[k])
     end
     exhead, :($Vsym.parent[$(indexexprs...)])
 end
+
+unsafe_getindex(v::Real, ind::Int) = v
+unsafe_getindex(v::Range, ind::Int) = first(v) + (ind-1)*step(v)
+unsafe_getindex(v::BitArray, ind::Int) = Base.unsafe_bitgetindex(v.chunks, ind)
+unsafe_getindex(v::AbstractArray, ind::Int) = v[ind]
+unsafe_getindex(v, ind::Real) = unsafe_getindex(v, to_index(ind))
+
 
 ## Implementations of getindex for AbstractArrays and Views
 
