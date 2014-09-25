@@ -1,5 +1,4 @@
-using ArrayViewsAPL
-using Iterators, Base.Test
+using ArrayViewsAPL, Base.Test
 
 A = reshape(float64(1:300), 5, 5, 3, 4)
 S = subview(A, 1:2, 1:2, 1:2, 1:2)
