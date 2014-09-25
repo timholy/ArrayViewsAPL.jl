@@ -52,7 +52,6 @@ similar(V::View, T, dim::Dims) = similar(V.parent, T, dims)
 ## View creation
 # APL-style.
 stagedfunction sliceview(A::AbstractArray, I::ViewIndex...)
-    length(I) == ndims(A) || error("$(length(I)) indexes does not match $A")
     N = 0
     sizeexprs = Any[]
     for k = 1:length(I)
@@ -69,7 +68,6 @@ end
 
 # Conventional style (drop trailing singleton dimensions, keep any other singletons)
 stagedfunction subview(A::AbstractArray, I::ViewIndex...)
-    length(I) == ndims(A) || error("$(length(I)) indexes does not match $A")
     sizeexprs = Any[]
     Itypes = Any[]
     Iexprs = Any[]
@@ -100,7 +98,6 @@ end
 # This "pops" the old View and creates a more compact one
 stagedfunction sliceview(V::View, I::ViewIndex...)
     T, NV, PV, IV = V.parameters
-    length(I) == NV || error("$(length(I)) indexes does not match $V")
     N = 0
     sizeexprs = Any[]
     indexexprs = Any[]
@@ -128,7 +125,6 @@ end
 
 stagedfunction subview(V::View, I::ViewIndex...)
     T, NV, PV, IV = V.parameters
-    length(I) == NV || error("$(length(I)) indexes does not match $V")
     N = length(I)
     while N > 0 && I[N] <: Real
         N -= 1
@@ -196,7 +192,7 @@ end
 # V[] notation (extracts the first element)
 stagedfunction getindex(V::View)
     T, N, P, IV = V.parameters
-    Isyms = ones(Int, ndims(V))
+    Isyms = ones(Int, N)
     exhead, ex = index_generate(N, IV, :V, Isyms)
     quote
         $exhead
@@ -259,7 +255,7 @@ function index_generate(Nd, Itypes, Vsym, Isyms)
     indexexprs = Array(Any, Nparent)
     j = 0
     for i = 1:Nparent
-        if Itypes[i] <: Real
+        if Itypes[i] <: Real && Nparent-i+1 > length(Isyms)-j  # consume Isyms if we're running out of V.indexes
             indexexprs[i] = :($Vsym.indexes[$i])
         else
             j += 1
