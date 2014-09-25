@@ -46,6 +46,59 @@ S = sliceview(P, 2, 1:2, 1:2)
 @test isa(S, View{Float64, 2, Array{Float64,4}, (Int,UnitRange{Int},Int,UnitRange{Int})})
 @test size(S) == (2,2)
 
+# 2d warmup
+A = reshape(1:24, 6, 4)
+B = subview(A, 1:6, 1:4)
+@test B == A
+B = sliceview(A, 1:6, 1:4)
+@test B == A
+B = subview(A, 2:2:6, 2)
+@test ndims(B) == 1
+@test B == [8:2:12]
+@test B[1] == 8
+@test B[1,1] == 8
+@test B[3] == 12
+@test B[3,1] == 12
+B = sliceview(A, 2:2:6, 2)
+@test ndims(B) == 1
+@test B == [8:2:12]
+@test B[1] == 8
+@test B[1,1] == 8
+@test B[3] == 12
+@test B[3,1] == 12
+B = subview(A, 2, 2:4)
+@test ndims(B) == 2
+@test B == A[2,2:4]
+@test B[1] == 8
+@test B[1,1] == 8
+@test B[1,1,1] == 8
+@test B[3] == 20
+@test B[1,3] == 20
+@test B[1,3,1] == 20
+B = sliceview(A, 2, 2:4)
+@test ndims(B) == 1
+@test B == squeeze(A[2,2:4], 1)
+@test B[1] == 8
+@test B[1,1] == 8
+@test B[1,1,1] == 8
+@test B[3] == 20
+@test B[3,1] == 20
+B = subview(A, 5:13)
+@test ndims(B) == 1
+@test B == [5:13]
+@test B[1] == 5
+@test B[9] == 13
+@test B[2,1] == 6
+@test B[8,1] == 12
+B = sliceview(A, 5:13)
+@test ndims(B) == 1
+@test B == [5:13]
+@test B[1] == 5
+@test B[9] == 13
+@test B[2,1] == 6
+@test B[8,1] == 12
+
+## Higher dimensional fuzz testing
 A = reshape(1:625, 5, 5, 5, 5)
 ## Indexing to extract a scalar
 # Linear indexing

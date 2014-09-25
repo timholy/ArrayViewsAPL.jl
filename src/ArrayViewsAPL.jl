@@ -174,14 +174,14 @@ for i = 1:4
     @eval begin
         stagedfunction getindex(V::View, $(typedvars...))
             T, N, P, IV = V.parameters
-            exhead, ex = index_generate(N, IV, :V, [$(vars...)])
+            exhead, ex = index_generate(ndims(P), IV, :V, [$(vars...)])
             quote
                 $exhead
                 $ex
             end
         end
         stagedfunction setindex!(V::View, v, $(typedvars...))
-            exhead, ex = index_generate(N, IV, :V, [$(vars...)])
+            exhead, ex = index_generate(ndims(P), IV, :V, [$(vars...)])
             quote
                 $exhead
                 $ex = v
@@ -193,7 +193,7 @@ end
 stagedfunction getindex(V::View)
     T, N, P, IV = V.parameters
     Isyms = ones(Int, N)
-    exhead, ex = index_generate(N, IV, :V, Isyms)
+    exhead, ex = index_generate(ndims(P), IV, :V, Isyms)
     quote
         $exhead
         $ex
@@ -203,7 +203,7 @@ end
 stagedfunction getindex(V::View, I::Real...)
     T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
-    exhead, ex = index_generate(N, IV, :V, Isyms)
+    exhead, ex = index_generate(ndims(P), IV, :V, Isyms)
     quote
         $exhead
         $ex
@@ -212,21 +212,28 @@ end
 stagedfunction setindex!(V::View, v, I::Real...)
     T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
-    exhead, ex = index_generate(N, IV, :V, Isyms)
+    exhead, ex = index_generate(ndims(P), IV, :V, Isyms)
     quote
         $exhead
         $ex = v
     end
 end
 
-function index_generate(Nd, Itypes, Vsym, Isyms)
+# NP is parent dimensionality, Itypes is the tuple typeof(V.indexes)
+# NP may not be equal to length(Itypes), because a view of a 2d matrix A
+# can be constructed as V = A[5:13] or as V = A[2:4, 1:3, 1].
+function index_generate(NP, Itypes, Vsym, Isyms)
     if isempty(Isyms)
         Isyms = Any[1]  # this handles the syntax getindex(V)
     end
     exhead = :nothing
-    if length(Isyms) < Nd
+    NV = 0
+    for I in Itypes
+        NV += !(I == Int)
+    end
+    if length(Isyms) < NV
         # Linear indexing in the last index
-        n = Nd - length(Isyms)
+        n = NV - length(Isyms)
         m = length(Isyms)
         strides = [gensym() for i = 1:n]
         indexes = [gensym() for i = 1:n+1]
@@ -251,11 +258,11 @@ function index_generate(Nd, Itypes, Vsym, Isyms)
         pop!(Isyms)
         append!(Isyms, indexes)
     end
-    Nparent = length(Itypes)
-    indexexprs = Array(Any, Nparent)
+    L = length(Itypes)
+    indexexprs = Array(Any, L)
     j = 0
-    for i = 1:Nparent
-        if Itypes[i] <: Real && Nparent-i+1 > length(Isyms)-j  # consume Isyms if we're running out of V.indexes
+    for i = 1:L
+        if Itypes[i] <: Real # && L-i+1 > length(Isyms)-j  # consume Isyms if we're running out of V.indexes
             indexexprs[i] = :($Vsym.indexes[$i])
         else
             j += 1
@@ -263,6 +270,11 @@ function index_generate(Nd, Itypes, Vsym, Isyms)
         end
     end
     # Append any extra indexes. Must be trailing 1s or it will cause a BoundsError.
+    if L < NP && j < length(Isyms)
+        # This view was created as V = A[5:13], so appending them would generate interpretive confusion.
+        # Instead, use double-indexing, i.e., A[indexes1...][indexes2...], where indexes2 contains the leftovers.
+        return exhead, :($Vsym.parent[$(indexexprs...)][$(Isyms[j+1:end]...)])
+    end
     for k = j+1:length(Isyms)
         push!(indexexprs, Isyms[k])
     end
