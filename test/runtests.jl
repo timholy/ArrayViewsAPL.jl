@@ -77,17 +77,18 @@ for l = 1:5, k = 1:5, j = 1:5, i = 1:5
 end
 
 ## Generic indexing
-index_choices = (1,3,5,2:3,1:2:5,1:5,[1,4,3])
+index_choices = (1,3,5,2:3,3:3,1:2:5,4:-1:2,1:5,[1,4,3])
 for i = 1:100
     ii = rand(1:length(index_choices), 4)
     indexes = index_choices[ii]
     B = A[indexes...]
     S = subview(A, indexes...)
+    @test size(S) == size(B)
     for j = 1:length(B)
         @test S[j] == B[j]
     end
-    @test size(S) == size(B)
     S = sliceview(A, indexes...)
+    @test size(S) == size(B)[[map(x->!isa(x,Int), indexes)...]]
     for j = 1:length(B)
         @test S[j] == B[j]
     end
@@ -101,11 +102,12 @@ for i = 1:100
     indexes[3] = index3_choices[rand(1:length(index3_choices))]
     B = A[indexes...]
     S = subview(A, indexes...)
+    @test size(S) == size(B)
     for j = 1:length(B)
         @test S[j] == B[j]
     end
-    @test size(S) == size(B)
     S = sliceview(A, indexes...)
+    @test size(S) == size(B)[[map(x->!isa(x,Int), indexes)...]]
     for j = 1:length(B)
         @test S[j] == B[j]
     end
@@ -117,11 +119,12 @@ for i = 1:100
     indexes[2] = index2_choices[rand(1:length(index2_choices))]
     B = A[indexes...]
     S = subview(A, indexes...)
+    @test size(S) == size(B)
     for j = 1:length(B)
         @test S[j] == B[j]
     end
-    @test size(S) == size(B)
     S = sliceview(A, indexes...)
+    @test size(S) == size(B)[[map(x->!isa(x,Int), indexes)...]]
     for j = 1:length(B)
         @test S[j] == B[j]
     end
@@ -130,78 +133,61 @@ index1_choices = (25,63,128,344,599,121:315,43:51:600,[19,1,603,623,555,229])
 for indexes in index1_choices
     B = A[indexes]
     S = subview(A, indexes)
-    for j = 1:length(B)
-        @test S[j] == B[j]
-    end
     @test size(S) == size(B)
+    for j = 1:length(B)
+        @test S[j] == B[j]
+    end
     S = sliceview(A, indexes)
+    @test size(S) == size(B)[[!isa(indexes,Int)]]
     for j = 1:length(B)
         @test S[j] == B[j]
     end
 end
 
-
-#=    
-A = reshape(1:75, 5, 5, 3)
-# Copy the values to a subarray. Do this manually since getindex(A, ...) will have a new meaning
-indexes1 = (2:4, 3, 1:2)
-Aslice1 = Array(eltype(A), length(indexes1[1]), length(indexes1[3]))
-i = 1
-for p in product(indexes1...)
-    Aslice1[i] = A[p...]
-    i += 1
-end
-Asub1 = reshape(Aslice1, map(length, indexes1))
-indexes2 = (2:4, 1:2, 3)
-Aslice2 = Array(eltype(A), length(indexes2[1]), length(indexes2[2]))
-i = 1
-for p in product(indexes2...)
-    Aslice2[i] = A[p...]
-    i += 1
-end
-Asub2 = Aslice2  # drop the last singleton dimension
-
-# sliceview
-for (indexes,Aslice) in ((indexes1,Aslice1), (indexes2,Aslice2))
-    @show indexes
-    B = sliceview(A, indexes...)
-    @test ndims(B) == 2
-    @test B[1,1] == Aslice[1,1]
-    @test B[2,2] == Aslice[2,2]
-    @test B[3] == Aslice[3]
-    @test B[4] == Aslice[4]
-    @test Aslice == B
-
-    C = sliceview(B, 1:3, 1:2)
-    @test C == B
-    C = sliceview(B, 2:3, 2)
-    @test ndims(C) == 1
-    @test C[1] == B[2,2]
-    @test C[2] == B[3,2]
-    C = sliceview(B, 2, 1:2)
-    @test ndims(C) == 1
-    @test C[1] == B[2,1]
-    @test C[2] == B[2,2]
-
-    @test C[1,1] == B[2,1]
-    @test_throws BoundsError C[1,2]
+function randsubset(indexes1)
+    n = length(indexes1)
+    indexesnew = Array(Any, n)
+    for i = 1:n
+        I = indexes1[i]
+        if isa(I, Int)
+            indexesnew[i] = 1
+        else
+            k = length(I)
+            r = rand()
+            if r < 0.3
+                l = rand(1:k)
+                indexesnew[i] = rand(1:k, l)
+            elseif r < 0.6
+                indexesnew[i] = rand(1:k)
+            else
+                i1 = rand(1:k)
+                i2 = rand(1:k)
+                indexesnew[i] = i1 >= i2 ? (i1:-1:i2) : (i1:1:i2)
+            end
+        end
+    end
+    indexes2 = [indexes1[k][indexesnew[k]] for k = 1:n]
+    indexesnew, indexes2
 end
 
-# subview
-for (indexes,Asub) in ((indexes1,Asub1), (indexes2,Asub2))
-    B = subview(A, indexes...)
-    @show typeof(B)
-    @test Asub == B
-
-    C = subview(B, 1:3, 1, 1:2)
-    @test C == B
-    C = subview(B, 2:3, 1, 2)
-    @test ndims(C) == 1
-    @test C[1] == B[2,2]
-    @test C[2] == B[3,2]
-    C = subview(B, 2, 1, 1:2)
-    @test ndims(C) == 3
-    @test C[1] == B[2,1]
-    @test C[2] == B[2,2]
+## Views of views
+for i = 1:100
+    ii = rand(1:length(index_choices), 4)
+    indexes = index_choices[ii]
+    indexesnew, indexescomposed = randsubset(indexes)
+    B = A[indexescomposed...]
+    S1 = subview(A, indexes...)
+    S = subview(S1, indexesnew...)
+    @test size(S) == size(B)
+    for j = 1:length(B)
+        @test S[j] == B[j]
+    end
+    S1 = sliceview(A, indexes...)
+    T, N, P, IV = typeof(S1).parameters
+    keepdim = [map(x->!(x<:Int), IV)...]
+    S = sliceview(S1, indexesnew[keepdim]...)
+    @test size(S) == size(B)[[map(x->!isa(x,Int), indexescomposed)...]]
+    for j = 1:length(B)
+        @test S[j] == B[j]
+    end
 end
-=#
