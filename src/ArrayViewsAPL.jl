@@ -18,7 +18,7 @@ export
 #    copy, similar---done
 #    stride, strides---done
 #    pointer and convert(Ptr{T}, V)---done
-#    boolean indexing
+#    boolean indexing? This seems problematic, we probably want copies in that case.
 # Decisions (which will turn into tasks, once decided):
 #    In writing getindex generally, do AbstractVector inputs make a copy or a view?
 #      (One question is whether it's better to reorganize the data for
@@ -32,8 +32,8 @@ export
 #                    and teach codegen to look for such expressions, skipping them if inside @inbounds.
 #                    See https://github.com/JuliaLang/julia/pull/3796#issuecomment-21433164)
 
-typealias ViewIndex Union(Int, UnitRange{Int}, StepRange{Int,Int}, Vector{Int})
 typealias NonSliceIndex Union(UnitRange{Int}, StepRange{Int,Int}, Vector{Int})
+typealias ViewIndex Union(Int, NonSliceIndex)
 
 # Since there are no multidimensional range objects, we only permit 1d indexes
 immutable View{T,N,P<:AbstractArray,I<:(ViewIndex...)} <: AbstractArray{T,N}
@@ -165,6 +165,10 @@ function rangetype(T1, T2)
     length(rt) == 1 || error("Can't infer return type")
     rt[1]
 end
+
+subview(A::AbstractArray, I::Union(ViewIndex, Colon)...) = subview(A, ntuple(length(I), i-> isa(I[i], Colon) ? (1:size(A,i)) : I[i])...)
+sliceview(A::AbstractArray, I::Union(ViewIndex, Colon)...) = sliceview(A, ntuple(length(I), i-> isa(I[i], Colon) ? (1:size(A,i)) : I[i])...)
+
 
 ## Strides
 stagedfunction strides(V::View)

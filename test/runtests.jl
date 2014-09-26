@@ -68,6 +68,10 @@ B = subview(A, 1:6, 1:4)
 B = sliceview(A, 1:6, 1:4)
 @test B == A
 @test pointer(B) == pointer(A)
+B = subview(A, :, :)
+@test B == A
+B = sliceview(A, :, :)
+@test B == A
 B = subview(A, 2:2:6, 2)
 @test ndims(B) == 1
 @test strides(B) == (2,)
