@@ -1,6 +1,6 @@
 module ArrayViewsAPL
 
-import Base: copy, eltype, getindex, length, ndims, setindex!, similar, size
+import Base: copy, eltype, getindex, length, ndims, setindex!, similar, size, stride, strides
 
 export
     # types
@@ -16,6 +16,9 @@ export
 #    scalar-indexing a View{T,N} with < N indexes aka linear indexing (ugh)---done
 #    utility functions like length, size---done
 #    copy, similar---done
+#    stride, strides---done
+#    pointer and convert(Ptr{T}, V)
+#    boolean indexing
 # Decisions (which will turn into tasks, once decided):
 #    In writing getindex generally, do AbstractVector inputs make a copy or a view?
 #      (One question is whether it's better to reorganize the data for
@@ -163,7 +166,28 @@ function rangetype(T1, T2)
     rt[1]
 end
 
-# Scalar indexing
+## Strides
+stagedfunction strides(V::View)
+    T,N,P,I = V.parameters
+    all(map(x->x<:RangeIndex, I)) || error("strides valid only for RangeIndex indexing")
+    strideexprs = Array(Any, N+1)
+    strideexprs[1] = 1
+    i = 1
+    Vdim = 1
+    for i = 1:length(I)
+        if !(I[i]==Int)
+            strideexprs[Vdim+1] = copy(strideexprs[Vdim])
+            strideexprs[Vdim] = :(step(V.indexes[$i])*$(strideexprs[Vdim]))
+            Vdim += 1
+        end
+        strideexprs[Vdim] = :(size(V.parent, $i) * $(strideexprs[Vdim]))
+    end
+    :(tuple($(strideexprs[1:N]...)))
+end
+
+stride(V::View, d::Integer) = d <= ndims(V) ? strides(V)[d] : strides(V)[end] * size(V)[end]
+
+## Scalar indexing
 # Low dimensions: avoid splatting
 vars = Expr[]
 typedvars = Expr[]
@@ -181,6 +205,7 @@ for i = 1:4
             end
         end
         stagedfunction setindex!(V::View, v, $(typedvars...))
+            T, N, P, IV = V.parameters
             exhead, ex = index_generate(ndims(P), IV, :V, [$(vars...)])
             quote
                 $exhead
