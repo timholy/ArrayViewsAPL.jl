@@ -1,6 +1,6 @@
 module ArrayViewsAPL
 
-import Base: copy, eltype, getindex, length, ndims, setindex!, similar, size, stride, strides
+import Base: convert, copy, eltype, getindex, length, ndims, pointer, setindex!, similar, size, stride, strides
 
 export
     # types
@@ -17,7 +17,7 @@ export
 #    utility functions like length, size---done
 #    copy, similar---done
 #    stride, strides---done
-#    pointer and convert(Ptr{T}, V)
+#    pointer and convert(Ptr{T}, V)---done
 #    boolean indexing
 # Decisions (which will turn into tasks, once decided):
 #    In writing getindex generally, do AbstractVector inputs make a copy or a view?
@@ -186,6 +186,34 @@ stagedfunction strides(V::View)
 end
 
 stride(V::View, d::Integer) = d <= ndims(V) ? strides(V)[d] : strides(V)[end] * size(V)[end]
+
+## Pointer conversion (for ccall)
+function first_index(V::View)
+    f = 1
+    s = 1
+    for i = 1:length(V.indexes)
+        f += (first(V.indexes[i])-1)*s
+        s *= size(V.parent, i)
+    end
+    f
+end
+
+convert{T,N,P<:Array,I<:(RangeIndex...)}(::Type{Ptr{T}}, V::View{T,N,P,I}) =
+    pointer(V.parent) + (first_index(V)-1)*sizeof(T)
+
+pointer(V::View, i::Int) = pointer(V, ind2sub(size(V), i))
+
+function pointer{T,N,P<:Array,I<:(RangeIndex...)}(V::View{T,N,P,I}, is::(Int...))
+    index = first_index(V)
+    strds = strides(V)
+    for d = 1:length(is)
+        index += (is[d]-1)*strds[d]
+    end
+    return pointer(V.parent, index)
+end
+
+## Convert
+convert{T,S,N}(::Type{Array{T,N}}, V::View{S,N}) = copy!(Array(T, size(V)), V)
 
 ## Scalar indexing
 # Low dimensions: avoid splatting

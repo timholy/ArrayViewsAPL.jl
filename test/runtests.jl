@@ -64,11 +64,14 @@ A = reshape(1:24, 6, 4)
 B = subview(A, 1:6, 1:4)
 @test B == A
 @test strides(B) == (1,6)
+@test pointer(B) == pointer(A)
 B = sliceview(A, 1:6, 1:4)
 @test B == A
+@test pointer(B) == pointer(A)
 B = subview(A, 2:2:6, 2)
 @test ndims(B) == 1
 @test strides(B) == (2,)
+@test pointer(B) == pointer(A)+7*sizeof(Int)
 @test B == [8:2:12]
 @test B[1] == 8
 @test B[1,1] == 8
@@ -76,6 +79,7 @@ B = subview(A, 2:2:6, 2)
 @test B[3,1] == 12
 B = sliceview(A, 2:2:6, 2)
 @test ndims(B) == 1
+@test pointer(B) == pointer(A)+7*sizeof(Int)
 @test B == [8:2:12]
 @test B[1] == 8
 @test B[1,1] == 8
@@ -84,6 +88,7 @@ B = sliceview(A, 2:2:6, 2)
 B = subview(A, 2, 2:4)
 @test ndims(B) == 2
 @test strides(B) == (1,6)
+@test pointer(B) == pointer(A)+7*sizeof(Int)
 @test B == A[2,2:4]
 @test B[1] == 8
 @test B[1,1] == 8
@@ -94,6 +99,7 @@ B = subview(A, 2, 2:4)
 B = sliceview(A, 2, 2:4)
 @test ndims(B) == 1
 @test strides(B) == (6,)
+@test pointer(B) == pointer(A)+7*sizeof(Int)
 @test B == squeeze(A[2,2:4], 1)
 @test B[1] == 8
 @test B[1,1] == 8
@@ -103,6 +109,7 @@ B = sliceview(A, 2, 2:4)
 B = subview(A, 5:13)
 @test ndims(B) == 1
 @test strides(B) == (1,)
+@test pointer(B) == pointer(A) + 4*sizeof(Int)
 @test B == [5:13]
 @test B[1] == 5
 @test B[9] == 13
@@ -110,12 +117,14 @@ B = subview(A, 5:13)
 @test B[8,1] == 12
 B = sliceview(A, 5:13)
 @test ndims(B) == 1
+@test pointer(B) == pointer(A) + 4*sizeof(Int)
 @test B == [5:13]
 @test B[1] == 5
 @test B[9] == 13
 @test B[2,1] == 6
 @test B[8,1] == 12
 B = subview(A, 1:3:6, 2:2:4)
+@test pointer(B) == pointer(A) + 6*sizeof(Int)
 @test size(B) == (2,2)
 @test strides(B) == (3,12)
 @test B[1] == 7
@@ -126,6 +135,7 @@ B = subview(A, 1:3:6, 2:2:4)
 B = subview(A, 5:-1:3, 4:-2:1)
 @test size(B) == (3,2)
 @test strides(B) == (-1,-12)
+@test pointer(B) == pointer(A) + 22*sizeof(Int)
 @test B[1] == 23
 @test B[5] == 10
 @test B[3,1] == 21
@@ -133,6 +143,7 @@ B = subview(A, 5:-1:3, 4:-2:1)
 @test B[3,2,1] == 9
 B = subview(A, [1,3,4], 1:2:4)
 @test_throws ErrorException strides(B)
+@test_throws MethodError pointer(B)
 
 ## Higher dimensional fuzz testing
 A = reshape(1:625, 5, 5, 5, 5)
