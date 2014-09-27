@@ -279,6 +279,12 @@ C = subview(B, 2:2:8)
 @test_throws ErrorException strides(C)
 @test C[1] == As[2]
 @test C[2,1] == As[4]
+C = sliceview(B, 2:2:8)
+@test ndims(C) == 1
+@test size(C) == (4,)
+@test_throws ErrorException strides(C)
+@test C[1] == As[2]
+@test C[2,1] == As[4]
 
 # with extra indexes
 C = sliceview(B, 1:6, 3, 1:1)

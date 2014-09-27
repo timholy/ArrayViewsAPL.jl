@@ -88,7 +88,7 @@ stagedfunction subview(A::AbstractArray, I::ViewIndex...)
         if k <= N
             push!(sizeexprs, :(length(I[$k])))
         end
-        if k <= N && I[k] <: Real
+        if k < N && I[k] <: Real
             push!(Itypes, UnitRange{Int})
             push!(Iexprs, :(int(I[$k]):int(I[$k])))
         else
@@ -118,13 +118,30 @@ stagedfunction sliceview(V::View, I::ViewIndex...)
             push!(Itypes, IV[j])
         else
             k += 1
-            if !(I[k] <: Real)
+            if k < length(I) || j == length(IV)
+                if !(I[k] <: Real)
+                    N += 1
+                    push!(sizeexprs, :(length(I[$k])))
+                end
+                push!(indexexprs, :(V.indexes[$j][I[$k]]))
+                push!(Itypes, rangetype(IV[j], I[k]))
+            else
+                # We have a linear index that spans more than one dimension of the parent
                 N += 1
                 push!(sizeexprs, :(length(I[$k])))
+                push!(indexexprs, :(ArrayViewsAPL.merge_indexes(V.indexes[$j:end], size(V.parent)[$j:end], I[$k])))
+                push!(Itypes, Array{Int, 1})
+                break
             end
-            push!(indexexprs, :(V.indexes[$j][I[$k]]))
-            push!(Itypes, rangetype(IV[j], I[k]))
         end
+    end
+    for i = k+1:length(I)
+        if !(I[i] <: Real)
+            N += 1
+            push!(sizeexprs, :(length(I[$i])))
+        end
+        push!(indexexprs, :(I[$i]))
+        push!(Itypes, I[i])
     end
     Inew = :(tuple($(indexexprs...)))
     dims = :(tuple($(sizeexprs...)))
@@ -151,14 +168,28 @@ stagedfunction subview(V::View, I::ViewIndex...)
             if k <= N
                 push!(sizeexprs, :(length(I[$k])))
             end
-            if k <= N && I[k] <: Real
+            if k < N && I[k] <: Real
+                # convert scalar to a range
                 push!(indexexprs, :(V.indexes[$j][int(I[$k]):int(I[$k])]))
                 push!(Itypes, rangetype(IV[j], UnitRange{Int}))
-            else
+            elseif k < length(I) || j == length(IV)
+                # simple indexing
                 push!(indexexprs, :(V.indexes[$j][I[$k]]))
                 push!(Itypes, rangetype(IV[j], I[k]))
+            else
+                # We have a linear index that spans more than one dimension of the parent
+                push!(indexexprs, :(ArrayViewsAPL.merge_indexes(V.indexes[$j:end], size(V.parent)[$j:end], I[$k])))
+                push!(Itypes, Array{Int, 1})
+                break
             end
         end
+    end
+    for i = k+1:length(I)
+        if i <= N
+            push!(sizeexprs, :(length(I[$i])))
+        end
+        push!(indexexprs, :(I[$i]))
+        push!(Itypes, I[i])
     end
     Inew = :(tuple($(indexexprs...)))
     dims = :(tuple($(sizeexprs...)))
@@ -382,6 +413,91 @@ unsafe_getindex(v::BitArray, ind::Int) = Base.unsafe_bitgetindex(v.chunks, ind)
 unsafe_getindex(v::AbstractArray, ind::Int) = v[ind]
 unsafe_getindex(v, ind::Real) = unsafe_getindex(v, to_index(ind))
 
+
+## Merging indexes
+# A view created like V = A[2:3:8, 5:2:17] can later be indexed as V[2:7],
+# creating a new 1d view.
+# In such cases we have to collapse the 2d space spanned by the ranges.
+#
+# API:
+#    merge_indexes(indexes::NTuple, dims::Dims, linindex)
+# where dims encodes the trailing dimensions of the parent array,
+# indexes encodes the view's trailing indexes into the parent array,
+# and linindex encodes the subset of these elements that we'll select.
+#
+# The generic algorithm makes use of div to convert elements
+# of linindex into a cartesian index into indexes, looks up
+# the corresponding cartesian index into the parent, and then uses
+# dims to convert back to a linear index into the parent array.
+#
+# However, a common case is linindex::UnitRange.
+# Since div is slow and in(j::Int, linindex::UnitRange) is fast,
+# it can be much faster to generate all possibilities and
+# then test whether the corresponding linear index is in linindex.
+# One exception occurs when only a small subset of the total
+# is desired, in which case we fall back to the div-based algorithm.
+stagedfunction merge_indexes(indexes::NTuple, dims::Dims, linindex::UnitRange{Int})
+    N = length(indexes)
+    N > 0 || error("Cannot merge empty indexes")
+    quote
+        n = length(linindex)
+        Base.Cartesian.@nexprs $N d->(I_d = indexes[d])
+        L = 1
+        Base.Cartesian.@nexprs $N d->(L *= length(I_d))
+        if n < 0.1L   # this has not been carefully tuned
+            return merge_indexes_div(indexes, dims, linindex)
+        end
+        Pstride_1 = 1   # parent strides
+        Base.Cartesian.@nexprs $(N-1) d->(Pstride_{d+1} = Pstride_d*dims[d])
+        Istride_1 = 1   # indexes strides
+        Base.Cartesian.@nexprs $(N-1) d->(Istride_{d+1} = Istride_d*length(I_d))
+        Base.Cartesian.@nexprs $N d->(counter_d = 1) # counter_0 is a linear index into indexes
+        Base.Cartesian.@nexprs $N d->(offset_d = 1)  # offset_0 is a linear index into parent
+        k = 0
+        index = Array(Int, n)
+        Base.Cartesian.@nloops $N i d->(1:length(I_d)) d->(offset_{d-1} = offset_d + (I_d[i_d]-1)*Pstride_d; counter_{d-1} = counter_d + (i_d-1)*Istride_d) begin
+            if in(counter_0, linindex)
+                index[k+=1] = offset_0
+            end
+        end
+        index
+    end
+end
+merge_indexes(indexes::NTuple, dims::Dims, linindex) = merge_indexes_div(indexes, dims, linindex)
+
+# This could be written as a regular function, but performance
+# will be better using Cartesian macros to avoid the heap and
+# an extra loop.
+stagedfunction merge_indexes_div(indexes::NTuple, dims::Dims, linindex)
+    N = length(indexes)
+    N > 0 || error("Cannot merge empty indexes")
+    Istride_N = symbol("Istride_$N")
+    quote
+        Base.Cartesian.@nexprs $N d->(I_d = indexes[d])
+        Pstride_1 = 1   # parent strides
+        Base.Cartesian.@nexprs $(N-1) d->(Pstride_{d+1} = Pstride_d*dims[d])
+        Istride_1 = 1   # indexes strides
+        Base.Cartesian.@nexprs $(N-1) d->(Istride_{d+1} = Istride_d*length(I_d))
+        n = length(linindex)
+        L = $(Istride_N) * length(indexes[end])
+        index = Array(Int, n)
+        for i = 1:n
+            k = linindex[i] # k is the indexes-centered linear index
+            1 <= k <= L || throw(BoundsError())
+            k -= 1
+            j = 0  # j will be the new parent-centered linear index
+            Base.Cartesian.@nexprs $N d->(d < $N ?
+                begin
+                    c, k = divrem(k, Istride_{$N-d+1})
+                    j += (ArrayViewsAPL.unsafe_getindex(I_{$N-d+1}, c+1)-1)*Pstride_{$N-d+1}
+                end : begin
+                    j += ArrayViewsAPL.unsafe_getindex(I_1, k+1)
+                end)
+            index[i] = j
+        end
+        index
+    end
+end
 
 ## Implementations of getindex for AbstractArrays and Views
 
