@@ -118,7 +118,7 @@ stagedfunction sliceview(V::View, I::ViewIndex...)
             push!(Itypes, IV[j])
         else
             k += 1
-            if k < length(I) || j == length(IV)
+            if k < length(I) || k == NV || j == length(IV)
                 if !(I[k] <: Real)
                     N += 1
                     push!(sizeexprs, :(length(I[$k])))
