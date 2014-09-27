@@ -530,14 +530,19 @@ end
 ## Implementations of getindex for AbstractArrays and Views
 
 # More utility functions
-stagedfunction copy(V::View)
-    T, N = eltype(V), ndims(V)
-    quote
-        A = Array($T, V.dims)
-        k = 1
-        Base.Cartesian.@nloops $N i A begin
-            @inbounds A[k] = Base.Cartesian.@nref($N, V, i)
-            k += 1
+# stagedfunction copy(V::View)
+#     T, N = eltype(V), ndims(V)
+#     quote
+#         A = Array($T, V.dims)
+#         k = 1
+#         Base.Cartesian.@nloops $N i A begin
+#             @inbounds A[k] = Base.Cartesian.@nref($N, V, i)
+#             k += 1
+#         end
+#         A
+#     end
+# end
+
 ## Compatability
 # deprecate?
 function parentdims(s::View)
