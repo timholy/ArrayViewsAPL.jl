@@ -228,13 +228,17 @@ convert{T,S,N}(::Type{Array{T,N}}, V::View{S,N}) = copy!(Array(T, size(V)), V)
 ## Scalar indexing
 # Low dimensions: avoid splatting
 vars = Expr[]
-typedvars = Expr[]
+varsInt = Expr[]
+varsReal = Expr[]
+vars_toindex = Expr[]
 for i = 1:4
     sym = symbol(string("i",i))
     push!(vars, Expr(:quote, sym))
-    push!(typedvars, :($sym::Real))
+    push!(varsInt, :($sym::Int))
+    push!(varsReal, :($sym::Real))
+    push!(vars_toindex, :(Base.to_index($sym)))
     @eval begin
-        stagedfunction getindex(V::View, $(typedvars...))
+        stagedfunction getindex(V::View, $(varsInt...))
             T, N, P, IV = V.parameters
             exhead, ex = index_generate(ndims(P), IV, :V, [$(vars...)])
             quote
@@ -242,7 +246,7 @@ for i = 1:4
                 $ex
             end
         end
-        stagedfunction setindex!(V::View, v, $(typedvars...))
+        stagedfunction setindex!(V::View, v, $(varsInt...))
             T, N, P, IV = V.parameters
             exhead, ex = index_generate(ndims(P), IV, :V, [$(vars...)])
             quote
@@ -250,6 +254,8 @@ for i = 1:4
                 $ex = v
             end
         end
+        getindex(V::View, $(varsReal...)) = getindex(V::View, $(vars_toindex...))
+        setindex!(V::View, v, $(varsReal...)) = setindex!(V::View, v, $(vars_toindex...))
     end
 end
 # V[] notation (extracts the first element)
@@ -263,7 +269,7 @@ stagedfunction getindex(V::View)
     end
 end
 # Splatting variants
-stagedfunction getindex(V::View, I::Real...)
+stagedfunction getindex(V::View, I::Int...)
     T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
     exhead, ex = index_generate(ndims(P), IV, :V, Isyms)
@@ -272,7 +278,7 @@ stagedfunction getindex(V::View, I::Real...)
         $ex
     end
 end
-stagedfunction setindex!(V::View, v, I::Real...)
+stagedfunction setindex!(V::View, v, I::Int...)
     T, N, P, IV = V.parameters
     Isyms = [:(I[$d]) for d = 1:length(I)]
     exhead, ex = index_generate(ndims(P), IV, :V, Isyms)
@@ -281,6 +287,9 @@ stagedfunction setindex!(V::View, v, I::Real...)
         $ex = v
     end
 end
+getindex(V::View, I::Real...) = getindex(V, to_index(I)...)
+setindex!(V::View, v, I::Real...) = setindex!(V, v, to_index(I)...)
+
 
 # NP is parent dimensionality, Itypes is the tuple typeof(V.indexes)
 # NP may not be equal to length(Itypes), because a view of a 2d matrix A
