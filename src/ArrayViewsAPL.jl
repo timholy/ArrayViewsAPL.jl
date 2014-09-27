@@ -1,6 +1,9 @@
 module ArrayViewsAPL
 
-import Base: convert, copy, eltype, getindex, length, ndims, pointer, setindex!, similar, size, stride, strides
+using Base.Cartesian
+
+import Base: convert, copy, eltype, getindex, length, ndims, parent, parentdims,
+    parentindexes, pointer, setindex!, similar, size, stride, strides
 
 export
     # types
@@ -50,7 +53,10 @@ ndims{T,N,P,I}(::Type{View{T,N,P,I}}) = N
 size(V::View) = V.dims
 size(V::View, d::Integer) = d <= ndims(V) ? (@inbounds ret = V.dims[d]; ret) : 1
 length(V::View) = prod(V.dims)
-similar(V::View, T, dim::Dims) = similar(V.parent, T, dims)
+similar(V::View, T, dims::Dims) = similar(V.parent, T, dims)
+
+parent(V::View) = V.parent
+parentindexes(V::View) = V.indexes
 
 ## View creation
 # APL-style.
@@ -356,9 +362,22 @@ stagedfunction copy(V::View)
         Base.Cartesian.@nloops $N i A begin
             @inbounds A[k] = Base.Cartesian.@nref($N, V, i)
             k += 1
+## Compatability
+# deprecate?
+function parentdims(s::View)
+    nd = ndims(s)
+    dimindex = Array(Int, nd)
+    sp = strides(s.parent)
+    sv = strides(s)
+    j = 1
+    for i = 1:ndims(s.parent)
+        r = s.indexes[i]
+        if j <= nd && (isa(r,Range) ? sp[i]*step(r) : sp[i]) == sv[j]
+            dimindex[j] = i
+            j += 1
         end
-        A
     end
+    dimindex
 end
 
 end
