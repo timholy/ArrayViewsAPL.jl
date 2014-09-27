@@ -290,6 +290,29 @@ end
 getindex(V::View, I::Real...) = getindex(V, to_index(I)...)
 setindex!(V::View, v, I::Real...) = setindex!(V, v, to_index(I)...)
 
+# Indexing with non-scalars. For now, this returns a copy, but changing that
+# is just a matter of deleting the explicit call to copy.
+ getindex(V::View, I::ViewIndex...) = copy(subview(V, I...))
+# setindex!(V::View, X, I::ViewIndex...) = copy!(subview(V, I...), X)
+
+@ngenerate N typeof(A) function setindex!(A::View, x, J::NTuple{N,Union(Real,AbstractVector)}...)
+    @ncall N checkbounds A J
+    @nexprs N d->(I_d = Base.to_index(J_d))
+    if !isa(x, AbstractArray)
+        @nloops N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
+            @inbounds (@nref N A j) = x
+        end
+    else
+        X = x
+        @ncall N Base.setindex_shape_check X I
+        k = 1
+        @nloops N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
+            @inbounds (@nref N A j) = X[k]
+            k += 1
+        end
+    end
+    A
+end
 
 # NP is parent dimensionality, Itypes is the tuple typeof(V.indexes)
 # NP may not be equal to length(Itypes), because a view of a 2d matrix A
