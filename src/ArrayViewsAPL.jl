@@ -260,14 +260,23 @@ convert{T,S,N}(::Type{Array{T,N}}, V::View{S,N}) = copy!(Array(T, size(V)), V)
 # Low dimensions: avoid splatting
 vars = Expr[]
 varsInt = Expr[]
-varsReal = Expr[]
+varsOther = Expr[]
 vars_toindex = Expr[]
 for i = 1:4
     sym = symbol(string("i",i))
     push!(vars, Expr(:quote, sym))
     push!(varsInt, :($sym::Int))
-    push!(varsReal, :($sym::Real))
+    push!(varsOther, :($sym::Union(Real, AbstractVector)))
     push!(vars_toindex, :(Base.to_index($sym)))
+    ex = i == 1 ? quote
+         getindex(V::View, $sym::Real) = getindex(V, Base.to_index($sym))
+        setindex!(V::View, v, $sym::Real) = setindex!(V, v, Base.to_index($sym))
+         getindex(V::View, $sym::AbstractVector{Bool}) = getindex(V, Base.to_index($sym))
+        setindex!(V::View, v, $sym::AbstractVector{Bool}) = setindex!(V, v, Base.to_index($sym))
+    end : quote
+         getindex(V::View, $(varsOther...)) = getindex(V::View, $(vars_toindex...))
+        setindex!(V::View, v, $(varsOther...)) = setindex!(V::View, v, $(vars_toindex...))
+    end
     @eval begin
         stagedfunction getindex(V::View, $(varsInt...))
             T, N, P, IV = V.parameters
@@ -285,8 +294,7 @@ for i = 1:4
                 $ex = v
             end
         end
-        getindex(V::View, $(varsReal...)) = getindex(V::View, $(vars_toindex...))
-        setindex!(V::View, v, $(varsReal...)) = setindex!(V::View, v, $(vars_toindex...))
+        $ex
     end
 end
 # V[] notation (extracts the first element)
@@ -318,31 +326,51 @@ stagedfunction setindex!(V::View, v, I::Int...)
         $ex = v
     end
 end
-getindex(V::View, I::Real...) = getindex(V, to_index(I)...)
-setindex!(V::View, v, I::Real...) = setindex!(V, v, to_index(I)...)
 
 # Indexing with non-scalars. For now, this returns a copy, but changing that
 # is just a matter of deleting the explicit call to copy.
- getindex(V::View, I::ViewIndex...) = copy(subview(V, I...))
-# setindex!(V::View, X, I::ViewIndex...) = copy!(subview(V, I...), X)
+getindex(V::View, I::ViewIndex...) = copy(subview(V, I...))
+getindex{T,N}(V::View{T,N}, I::AbstractArray{Bool,N}) = copy(subview(V, find(I)))   # this could be much better optimized
+getindex{T,N}(V::View{T,N}, I::Union(Real, AbstractVector)...) = getindex(V, Base.to_index(I)...)
 
-@ngenerate N typeof(A) function setindex!(A::View, x, J::NTuple{N,Union(Real,AbstractVector)}...)
-    @ncall N checkbounds A J
-    @nexprs N d->(I_d = Base.to_index(J_d))
-    if !isa(x, AbstractArray)
-        @nloops N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
-            @inbounds (@nref N A j) = x
+function setindex!{T}(V::View{T,1}, v, I::AbstractArray{Bool,1})
+    length(I) == length(V) || throw(DimensionMismatch("logical vector must match array length"))
+    setindex!(V, v, Base.to_index(I))
+end
+function setindex!{T,N}(V::View{T,N}, v, I::AbstractArray{Bool,1})
+    length(I) == length(V) || throw(DimensionMismatch("logical vector must match array length"))
+    setindex!(V, v, Base.to_index(I))
+end
+function setindex!{T,N}(V::View{T,N}, v, I::AbstractArray{Bool,N})
+    size(I) == size(V) || throw(DimensionMismatch("size of Boolean mask must match array size"))
+    _setindex!(V, v, find(I))  # this could be better optimized
+end
+setindex!{T,N}(V::View{T,N}, v, I::Union(Real,AbstractVector)...) = setindex!(V, v, Base.to_index(I)...)
+setindex!(V::View, x, J::Union(Int,AbstractVector)...) = _setindex!(V, x, J...)
+stagedfunction _setindex!(V::View, x, J::Union(Real,AbstractVector)...)
+    gen_setindex_body(length(J))
+end
+
+function gen_setindex_body(N::Int)
+    quote
+        Base.Cartesian.@nexprs $N d->(J_d = J[d])
+        Base.Cartesian.@ncall $N checkbounds V J
+        Base.Cartesian.@nexprs $N d->(I_d = Base.to_index(J_d))
+        if !isa(x, AbstractArray)
+            Base.Cartesian.@nloops $N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
+                @inbounds (Base.Cartesian.@nref $N V j) = x
+            end
+        else
+            X = x
+            Base.Cartesian.@ncall $N Base.setindex_shape_check X I
+            k = 1
+            Base.Cartesian.@nloops $N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
+                @inbounds (Base.Cartesian.@nref $N V j) = X[k]
+                k += 1
+            end
         end
-    else
-        X = x
-        @ncall N Base.setindex_shape_check X I
-        k = 1
-        @nloops N i d->(1:length(I_d)) d->(@inbounds j_d = Base.unsafe_getindex(I_d, i_d)) begin
-            @inbounds (@nref N A j) = X[k]
-            k += 1
-        end
+        V
     end
-    A
 end
 
 # NP is parent dimensionality, Itypes is the tuple typeof(V.indexes)
@@ -409,9 +437,9 @@ end
 
 unsafe_getindex(v::Real, ind::Int) = v
 unsafe_getindex(v::Range, ind::Int) = first(v) + (ind-1)*step(v)
-unsafe_getindex(v::BitArray, ind::Int) = Base.unsafe_bitgetindex(v.chunks, ind)
+# unsafe_getindex(v::BitArray, ind::Int) = Base.unsafe_bitgetindex(v.chunks, ind)
 unsafe_getindex(v::AbstractArray, ind::Int) = v[ind]
-unsafe_getindex(v, ind::Real) = unsafe_getindex(v, to_index(ind))
+unsafe_getindex(v, ind::Real) = unsafe_getindex(v, Base.to_index(ind))
 
 
 ## Merging indexes
