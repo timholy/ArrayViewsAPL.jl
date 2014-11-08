@@ -12,34 +12,11 @@ export
     sliceview,
     subview
 
-# Tasks:
-#    creating a View from an AbstractArray---done
-#    creating a View from a View---done
-#    scalar-indexing a View{T,N} using N indexes---done
-#    scalar-indexing a View{T,N} with < N indexes aka linear indexing (ugh)---done
-#    utility functions like length, size---done
-#    copy, similar---done
-#    stride, strides---done
-#    pointer and convert(Ptr{T}, V)---done
-#    boolean indexing? This seems problematic, we probably want copies in that case.
-# Decisions (which will turn into tasks, once decided):
-#    In writing getindex generally, do AbstractVector inputs make a copy or a view?
-#      (One question is whether it's better to reorganize the data for
-#       good cache behavior---might as well get it done at the beginning---or is it better to
-#       minimize memory usage/construction time? Maybe we need both options.)
-#    If we want APL, must generalize to more than 1d indexes. Does this always create a copy? If so,
-#       we only have to generalize getindex, the View type does not need generalization.
-# Related issues that need to be tackled:
-#    boundschecking (approach: introduce Expr(:withmeta, expr, :boundscheck) expressions, created like this:
-#                        @boundscheck 1 <= i <= size(A,1) || throw(BoundsError())
-#                    and teach codegen to look for such expressions, skipping them if inside @inbounds.
-#                    See https://github.com/JuliaLang/julia/pull/3796#issuecomment-21433164)
-
 typealias NonSliceIndex Union(UnitRange{Int}, StepRange{Int,Int}, Vector{Int})
 typealias ViewIndex Union(Int, NonSliceIndex)
 
 # Since there are no multidimensional range objects, we only permit 1d indexes
-immutable View{T,N,P<:AbstractArray,I<:(ViewIndex...)} <: AbstractArray{T,N}
+type View{T,N,P<:AbstractArray,I<:(ViewIndex...)} <: AbstractArray{T,N}
     parent::P
     indexes::I
     dims::NTuple{N,Int}
@@ -53,7 +30,9 @@ ndims{T,N,P,I}(::Type{View{T,N,P,I}}) = N
 size(V::View) = V.dims
 size(V::View, d::Integer) = d <= ndims(V) ? (@inbounds ret = V.dims[d]; ret) : 1
 length(V::View) = prod(V.dims)
+
 similar(V::View, T, dims::Dims) = similar(V.parent, T, dims)
+copy(V::View) = copy!(similar(V.parent, size(V)), V)
 
 parent(V::View) = V.parent
 parentindexes(V::View) = V.indexes
@@ -241,6 +220,9 @@ end
 
 convert{T,N,P<:Array,I<:(RangeIndex...)}(::Type{Ptr{T}}, V::View{T,N,P,I}) =
     pointer(V.parent) + (first_index(V)-1)*sizeof(T)
+
+convert{T,N,P<:Array,I<:(RangeIndex...)}(::Type{Ptr{Void}}, V::View{T,N,P,I}) =
+    convert(Ptr{Void}, convert(Ptr{T}, V))
 
 pointer(V::View, i::Int) = pointer(V, ind2sub(size(V), i))
 
@@ -437,7 +419,6 @@ end
 
 unsafe_getindex(v::Real, ind::Int) = v
 unsafe_getindex(v::Range, ind::Int) = first(v) + (ind-1)*step(v)
-# unsafe_getindex(v::BitArray, ind::Int) = Base.unsafe_bitgetindex(v.chunks, ind)
 unsafe_getindex(v::AbstractArray, ind::Int) = v[ind]
 unsafe_getindex(v, ind::Real) = unsafe_getindex(v, Base.to_index(ind))
 
@@ -526,22 +507,6 @@ stagedfunction merge_indexes_div(indexes::NTuple, dims::Dims, linindex)
         index
     end
 end
-
-## Implementations of getindex for AbstractArrays and Views
-
-# More utility functions
-# stagedfunction copy(V::View)
-#     T, N = eltype(V), ndims(V)
-#     quote
-#         A = Array($T, V.dims)
-#         k = 1
-#         Base.Cartesian.@nloops $N i A begin
-#             @inbounds A[k] = Base.Cartesian.@nref($N, V, i)
-#             k += 1
-#         end
-#         A
-#     end
-# end
 
 ## Compatability
 # deprecate?
