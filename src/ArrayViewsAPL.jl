@@ -38,8 +38,8 @@ parent(V::View) = V.parent
 parentindexes(V::View) = V.indexes
 
 ## View creation
-# APL-style.
-stagedfunction sliceview(A::AbstractArray, I::ViewIndex...)
+
+stagedfunction sliceview{T,NP}(A::AbstractArray{T,NP}, I::ViewIndex...)
     N = 0
     sizeexprs = Any[]
     for k = 1:length(I)
@@ -50,12 +50,11 @@ stagedfunction sliceview(A::AbstractArray, I::ViewIndex...)
         end
     end
     dims = :(tuple($(sizeexprs...)))
-    T = eltype(A)
     :(ArrayViewsAPL.View{$T,$N,$A,$I}(A, I, $dims))
 end
 
 # Conventional style (drop trailing singleton dimensions, keep any other singletons)
-stagedfunction subview(A::AbstractArray, I::ViewIndex...)
+stagedfunction subview{T,NP}(A::AbstractArray{T,NP}, I::ViewIndex...)
     sizeexprs = Any[]
     Itypes = Any[]
     Iexprs = Any[]
@@ -77,15 +76,13 @@ stagedfunction subview(A::AbstractArray, I::ViewIndex...)
     end
     dims = :(tuple($(sizeexprs...)))
     Iext = :(tuple($(Iexprs...)))
-    T = eltype(A)
     It = tuple(Itypes...)
     :(ArrayViewsAPL.View{$T,$N,$A,$It}(A, $Iext, $dims))
 end
 
 # Constructing from another View
 # This "pops" the old View and creates a more compact one
-stagedfunction sliceview(V::View, I::ViewIndex...)
-    T, NV, PV, IV = V.parameters
+stagedfunction sliceview{T,NV,PV,IV}(V::View{T,NV,PV,IV}, I::ViewIndex...)
     N = 0
     sizeexprs = Any[]
     indexexprs = Any[]
@@ -128,8 +125,7 @@ stagedfunction sliceview(V::View, I::ViewIndex...)
     :(ArrayViewsAPL.View{$T,$N,$PV,$It}(V.parent, $Inew, $dims))
 end
 
-stagedfunction subview(V::View, I::ViewIndex...)
-    T, NV, PV, IV = V.parameters
+stagedfunction subview{T,NV,PV,IV}(V::View{T,NV,PV,IV}, I::ViewIndex...)
     N = length(I)
     while N > 0 && I[N] <: Real
         N -= 1
